@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.class
+
+# Fabric / run directories
+run/
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Don't commit the unzipped output
+*.zip

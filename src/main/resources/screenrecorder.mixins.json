@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.screenrecorder.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "GameRendererMixin",
+    "InGameHudMixin",
+    "TitleScreenMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

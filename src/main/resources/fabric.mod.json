@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "screenrecorder",
+  "version": "1.0.0",
+  "name": "Screen Recorder",
+  "description": "In-game screen recorder with gallery. Designed for MobileGlues renderer (Zalith Launcher, DroidBridge).",
+  "authors": ["Your Name"],
+  "contact": {},
+  "license": "MIT",
+
+  "environment": "client",
+
+  "entrypoints": {
+    "main": [
+      "com.screenrecorder.ScreenRecorderMod"
+    ],
+    "client": [
+      "com.screenrecorder.ScreenRecorderClient"
+    ]
+  },
+
+  "mixins": [
+    "screenrecorder.mixins.json"
+  ],
+
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api":   "*",
+    "minecraft":    "~1.21.1",
+    "java":         ">=21"
+  }
+}

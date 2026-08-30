@@ -1,0 +1,32 @@
+{
+  "category.screenrecorder.keys": "Screen Recorder",
+
+  "key.screenrecorder.start":  "Start / Resume Recording",
+  "key.screenrecorder.pause":  "Pause Recording",
+  "key.screenrecorder.stop":   "Stop Recording",
+
+  "screenrecorder.button.start":    "▶ Start Recording",
+  "screenrecorder.button.pause":    "⏸ Pause Recording",
+  "screenrecorder.button.resume":   "▶ Resume Recording",
+  "screenrecorder.button.stop":     "⏹ Stop Recording",
+  "screenrecorder.button.gallery":  "🎬 Recordings",
+  "screenrecorder.button.settings": "⚙ Settings",
+
+  "screenrecorder.message.started": "Recording started",
+  "screenrecorder.message.paused":  "Recording paused",
+  "screenrecorder.message.resumed": "Recording resumed",
+  "screenrecorder.message.stopped": "Recording saved — open Gallery to render it",
+
+  "screenrecorder.gallery.title":                "My Recordings",
+  "screenrecorder.gallery.prev":                 "< Prev",
+  "screenrecorder.gallery.next":                 "Next >",
+  "screenrecorder.gallery.refresh":              "↻ Refresh",
+  "screenrecorder.gallery.delete_confirm_title": "Delete Recording?",
+  "screenrecorder.gallery.delete_confirm_body":  "Permanently delete \"%s\" (and its MP4 if any)?",
+
+  "screenrecorder.settings.title":          "Screen Recorder Settings",
+  "screenrecorder.settings.fps":            "Render FPS: %d",
+  "screenrecorder.settings.resolution":     "Render Resolution: %d%%",
+  "screenrecorder.settings.preset_mobile":  "📱 Mobile Preset (20fps / 75%%)",
+  "screenrecorder.settings.output_dir":     "Output folder: %s"
+}
