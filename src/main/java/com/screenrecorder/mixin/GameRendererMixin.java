@@ -13,14 +13,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class GameRendererMixin {
 
     @Inject(
-        method = "render(Lnet/minecraft/client/render/RenderTickCounter;Z)V",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/client/util/Window;swapBuffers()V",
-            shift = At.Shift.BEFORE
-        )
+        method = "render",
+        at = @At("TAIL")
     )
-    private void onBeforeSwapBuffers(RenderTickCounter tickCounter, boolean tick, CallbackInfo ci) {
+    private void onRenderTail(RenderTickCounter tickCounter, boolean tick, CallbackInfo ci) {
         if (RecordingManager.getInstance().getState() == RecordingState.RECORDING) {
             RecordingManager.getInstance().onFrameEnd();
         }
