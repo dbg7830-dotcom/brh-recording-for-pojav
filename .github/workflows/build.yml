@@ -1,4 +1,4 @@
-name: Build Mod
+name: Le Build Recorder
 
 on:
   push:
@@ -21,12 +21,16 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.8'
+      - name: Download Gradle wrapper jar
+        run: |
+          mkdir -p gradle/wrapper
+          curl -L -o gradle/wrapper/gradle-wrapper.jar \
+            https://github.com/gradle/gradle/raw/v8.8.0/gradle/wrapper/gradle-wrapper.jar
 
-      - name: Cache Gradle packages
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Cache Gradle
         uses: actions/cache@v4
         with:
           path: |
@@ -36,10 +40,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Build with Gradle
-        run: gradle build --no-daemon
+      - name: Build with Gradle (Loom)
+        run: ./gradlew build --no-daemon
 
-      - name: Upload JAR artifact
+      - name: Upload JAR
         uses: actions/upload-artifact@v4
         with:
           name: screenrecorder-mod
