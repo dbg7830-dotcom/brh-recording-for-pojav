@@ -16,46 +16,38 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Gallery screen — browse .rawvid recordings, render them to MP4,
- * play finished videos, or delete entries.
+ * Gallery screen — browse .rawvid recordings, render to MP4, play, delete.
  *
- * Layout (ReplayMod-inspired, bottom-left control buttons):
- * ┌──────────────────────────────────────────────────────────────┐
- * │  🎬 My Recordings          3 recordings   [🔍 Search...   ] │
- * ├──────────────────────────────────────────────────────────────┤
- * │▌ ┌──────────┐  recording_2024-06-15_14-32-07      [.rawvid] │
- * │  │  🎬      │  Jun 15, 2024  14:32  •  210 MB               │
- * │  │ Loading… │  [ 🎬 Render to MP4 ]  [ 📁 Folder ]  [ 🗑 ] │
- * │  └──────────┘                                               │
- * │▌ ┌──────────┐  recording_2024-06-14_09-10-55        [MP4✓] │
- * │  │ PREVIEW  │  Jun 14, 2024  09:10  •  198 MB               │
- * │  └──────────┘  [ ▶ Play MP4 ]  [ 📁 Folder ]  [ 🗑 Delete ]│
- * ├──────────────────────────────────────────────────────────────┤
- * │ [↻ Refresh]   < Prev   Page 1 / 2   Next >       [ ✕ Back ]│
- * └──────────────────────────────────────────────────────────────┘
+ * Each row has real ButtonWidget buttons (not text labels) so they are
+ * always clearly readable and tappable on mobile screens.
+ *
+ * Rows are rebuilt every time the page changes or entries are refreshed.
+ * Desktop.open() is never called — Android uses `am start` intent instead,
+ * which avoids the UnsupportedOperationException crash.
  */
 public class RecordingGalleryScreen extends Screen {
 
     // Layout
-    private static final int THUMB_W   = 120;
-    private static final int THUMB_H   = 68;
-    private static final int ROW_H     = 84;
-    private static final int ROW_PAD   = 6;
-    private static final int ROWS_PAGE = 5;
+    private static final int THUMB_W    = 100;
+    private static final int THUMB_H    = 56;
+    private static final int ROW_H      = 76;
+    private static final int ROW_PAD    = 5;
+    private static final int LIST_TOP   = 32;
+    private static final int FOOTER_H   = 28;
+    private static final int BTN_W      = 90;
+    private static final int BTN_H      = 16;
+    private static final int ROWS_PAGE  = 5;
 
-    // Colours (ARGB)
+    // Colours
     private static final int C_BG      = 0xFF1A1A2E;
     private static final int C_ROW_A   = 0xFF16213E;
     private static final int C_ROW_B   = 0xFF0F3460;
-    private static final int C_HOV     = 0xFF533483;
     private static final int C_ACCENT  = 0xFFE94560;
     private static final int C_TEXT    = 0xFFEEEEEE;
     private static final int C_SUB     = 0xFF9E9E9E;
     private static final int C_THBG    = 0xFF0D0D1A;
     private static final int C_GREEN   = 0xFF81C784;
-    private static final int C_BLUE    = 0xFF4FC3F7;
-    private static final int C_RED     = 0xFFEF5350;
-    private static final int C_ORANGE  = 0xFFFFB74D;
+    private static final int C_SUB2    = 0xFF888888;
 
     private final Screen parent;
     private final ThumbnailCache thumbs = new ThumbnailCache();
@@ -65,6 +57,9 @@ public class RecordingGalleryScreen extends Screen {
     private int    page         = 0;
     private String renderStatus = "";
 
+    // Row buttons — rebuilt when page changes
+    private final List<ButtonWidget> rowButtons = new ArrayList<>();
+
     private TextFieldWidget searchBox;
     private ButtonWidget    prevBtn, nextBtn;
 
@@ -73,35 +68,93 @@ public class RecordingGalleryScreen extends Screen {
         this.parent = parent;
     }
 
-    // ── Init ─────────────────────────────────────────────────────────────────
+    // ── Init / rebuild ────────────────────────────────────────────────────────
 
     @Override
     protected void init() {
         loadEntries();
+        applyFilter("");
+        buildFooterButtons();
+        buildRowButtons();
+    }
 
-        int bh = 20, footY = height - bh - 6;
+    private void buildFooterButtons() {
+        int bh = 20, footY = height - FOOTER_H + 4;
 
         prevBtn = ButtonWidget.builder(Text.literal("< Prev"),
-                btn -> { page--; }).dimensions(width/2 - 110, footY, 60, bh).build();
+                btn -> changePage(-1)).dimensions(width / 2 - 110, footY, 60, bh).build();
         nextBtn = ButtonWidget.builder(Text.literal("Next >"),
-                btn -> { page++; }).dimensions(width/2 + 50, footY, 60, bh).build();
+                btn -> changePage(1)).dimensions(width / 2 + 50, footY, 60, bh).build();
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("↻ Refresh"),
-                btn -> { loadEntries(); applyFilter(searchBox.getText()); })
-                .dimensions(6, footY, 70, bh).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal("↻"),
+                btn -> { loadEntries(); applyFilter(searchBox != null ? searchBox.getText() : ""); rebuildRowButtons(); })
+                .dimensions(6, footY, 30, bh).build());
+
         addDrawableChild(ButtonWidget.builder(Text.translatable("gui.back"),
                 btn -> close())
                 .dimensions(width - 76, footY, 70, bh).build());
+
         addDrawableChild(prevBtn);
         addDrawableChild(nextBtn);
 
         searchBox = new TextFieldWidget(textRenderer,
-                width - 174, 8, 168, 18, Text.literal("Search…"));
-        searchBox.setPlaceholder(Text.literal("Search recordings…"));
-        searchBox.setChangedListener(q -> { page = 0; applyFilter(q); });
+                width - 170, 8, 162, 16, Text.literal("Search…"));
+        searchBox.setPlaceholder(Text.literal("Search…"));
+        searchBox.setChangedListener(q -> { page = 0; applyFilter(q); rebuildRowButtons(); });
         addDrawableChild(searchBox);
+    }
 
-        applyFilter("");
+    private void buildRowButtons() {
+        rowButtons.clear();
+        List<RecordingEntry> entries = pageEntries();
+        int rowY = LIST_TOP + ROW_PAD;
+
+        for (RecordingEntry e : entries) {
+            int textX = ROW_PAD + 8 + THUMB_W + 8;
+            int btnY  = rowY + ROW_H - BTN_H - 6;
+            int bx    = textX;
+
+            if (e.renderedMp4 != null) {
+                // Play button
+                ButtonWidget play = ButtonWidget.builder(Text.literal("▶ Play"),
+                        btn -> playFile(e.renderedMp4))
+                        .dimensions(bx, btnY, BTN_W, BTN_H).build();
+                rowButtons.add(play);
+                addDrawableChild(play);
+                bx += BTN_W + 4;
+            } else if (PojavFFmpegRenderer.canRender()) {
+                // Render button
+                ButtonWidget render = ButtonWidget.builder(Text.literal("Render MP4"),
+                        btn -> { if (!e.rendering) startRender(e); })
+                        .dimensions(bx, btnY, BTN_W, BTN_H).build();
+                rowButtons.add(render);
+                addDrawableChild(render);
+                bx += BTN_W + 4;
+            }
+
+            // Delete button — always present
+            ButtonWidget del = ButtonWidget.builder(Text.literal("Delete"),
+                    btn -> confirmDelete(e))
+                    .dimensions(bx, btnY, BTN_W - 20, BTN_H).build();
+            rowButtons.add(del);
+            addDrawableChild(del);
+
+            rowY += ROW_H + ROW_PAD;
+        }
+
+        updatePaginationButtons();
+    }
+
+    private void rebuildRowButtons() {
+        // Remove old row buttons from children, then rebuild
+        for (ButtonWidget b : rowButtons) remove(b);
+        rowButtons.clear();
+        buildRowButtons();
+    }
+
+    private void changePage(int delta) {
+        page = Math.max(0, Math.min(page + delta, totalPages() - 1));
+        rebuildRowButtons();
     }
 
     // ── Data ─────────────────────────────────────────────────────────────────
@@ -115,7 +168,6 @@ public class RecordingGalleryScreen extends Screen {
         if (files != null)
             for (File f : files) all.add(new RecordingEntry(f));
         all.sort(Comparator.comparingLong((RecordingEntry e) -> e.lastModified).reversed());
-        ScreenRecorderMod.LOGGER.info("Gallery: loaded " + all.size() + " recording(s)");
     }
 
     private void applyFilter(String q) {
@@ -138,241 +190,158 @@ public class RecordingGalleryScreen extends Screen {
         return from >= filtered.size() ? List.of() : filtered.subList(from, to);
     }
 
+    private void updatePaginationButtons() {
+        if (prevBtn != null) prevBtn.active = page > 0;
+        if (nextBtn != null) nextBtn.active = page < totalPages() - 1;
+    }
+
     // ── Render ───────────────────────────────────────────────────────────────
 
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
+        // Background
         ctx.fill(0, 0, width, height, C_BG);
-        renderHeader(ctx);
-        renderRows(ctx, mx, my);
-        renderFooter(ctx);
-        prevBtn.active = page > 0;
-        nextBtn.active = page < totalPages() - 1;
-        super.render(ctx, mx, my, delta);
-    }
 
-    private void renderHeader(DrawContext ctx) {
-        ctx.fill(0, 0, width, 30, 0xFF0D0D1A);
-        ctx.fill(0, 29, width, 30, C_ACCENT);
+        // Header bar
+        ctx.fill(0, 0, width, LIST_TOP, 0xFF0D0D1A);
+        ctx.fill(0, LIST_TOP - 1, width, LIST_TOP, C_ACCENT);
         ctx.drawTextWithShadow(textRenderer,
                 Text.translatable("screenrecorder.gallery.title"), 8, 10, C_ACCENT);
-        String cnt = filtered.size() + " recording" + (filtered.size() != 1 ? "s" : "");
-        ctx.drawTextWithShadow(textRenderer, cnt,
-                8 + textRenderer.getWidth("My Recordings") + 14, 10, C_SUB);
+        ctx.drawTextWithShadow(textRenderer,
+                filtered.size() + " recording" + (filtered.size() != 1 ? "s" : ""),
+                8 + textRenderer.getWidth("My Recordings") + 12, 10, C_SUB);
+
+        // Rows
+        renderRows(ctx, mx, my);
+
+        // Footer bar
+        int fy = height - FOOTER_H;
+        ctx.fill(0, fy, width, height, 0xFF0D0D1A);
+        ctx.fill(0, fy, width, fy + 1, C_ACCENT);
+        ctx.drawCenteredTextWithShadow(textRenderer,
+                "Page " + (page + 1) + " / " + totalPages(),
+                width / 2, height - 10, C_SUB);
+        if (!renderStatus.isEmpty()) {
+            ctx.drawTextWithShadow(textRenderer, renderStatus, 40, height - 10, 0xFFFFB74D);
+        }
+
+        updatePaginationButtons();
+        super.render(ctx, mx, my, delta);
     }
 
     private void renderRows(DrawContext ctx, int mx, int my) {
         List<RecordingEntry> entries = pageEntries();
-        int rowY = 34 + ROW_PAD;
+        int rowY = LIST_TOP + ROW_PAD;
 
         for (int i = 0; i < entries.size(); i++) {
             RecordingEntry e = entries.get(i);
-            int rowX = ROW_PAD, rowW = width - ROW_PAD * 2;
-            boolean hov = mx >= rowX && mx <= rowX + rowW
-                       && my >= rowY && my <= rowY + ROW_H;
+            int rowX = ROW_PAD;
+            int rowW = width - ROW_PAD * 2;
 
-            // Row background + accent bar
+            // Row bg
             ctx.fill(rowX, rowY, rowX + rowW, rowY + ROW_H,
-                    hov ? C_HOV : (i % 2 == 0 ? C_ROW_A : C_ROW_B));
+                    i % 2 == 0 ? C_ROW_A : C_ROW_B);
+            // Accent left bar
             ctx.fill(rowX, rowY, rowX + 3, rowY + ROW_H, C_ACCENT);
 
             // Thumbnail
-            int tx = rowX + 8, ty = rowY + (ROW_H - THUMB_H) / 2;
+            int tx = rowX + 8;
+            int ty = rowY + (ROW_H - THUMB_H) / 2;
             renderThumb(ctx, e, tx, ty);
 
-            // Text column
-            int textX = tx + THUMB_W + 10;
-            int textY = rowY + 8;
+            // Text
+            int textX = tx + THUMB_W + 8;
+            int textY = rowY + 6;
 
-            // Recording name
-            ctx.drawTextWithShadow(textRenderer, e.displayName, textX, textY, C_TEXT);
+            // Name (clip if too long)
+            String name = e.displayName;
+            int maxNameW = rowW - textX - 60;
+            while (name.length() > 4 && textRenderer.getWidth(name) > maxNameW) {
+                name = name.substring(0, name.length() - 4) + "…";
+            }
+            ctx.drawTextWithShadow(textRenderer, name, textX, textY, C_TEXT);
 
-            // Status badge (top-right of row)
+            // Badge top-right
             String badge  = e.renderedMp4 != null ? "MP4 ✓" : ".rawvid";
-            int    badgeC = e.renderedMp4 != null ? C_GREEN : C_SUB;
-            ctx.drawTextWithShadow(textRenderer, "[" + badge + "]",
-                    rowX + rowW - textRenderer.getWidth("[" + badge + "]") - 8,
-                    textY, badgeC);
+            int    badgeC = e.renderedMp4 != null ? C_GREEN : C_SUB2;
+            ctx.drawTextWithShadow(textRenderer, badge,
+                    rowX + rowW - textRenderer.getWidth(badge) - 6, textY, badgeC);
 
             // Date + size
             ctx.drawTextWithShadow(textRenderer,
-                    e.dateString + "  •  " + e.sizeString, textX, textY + 13, C_SUB);
+                    e.dateString + "  " + e.sizeString,
+                    textX, textY + 12, C_SUB);
 
-            // Action row or render progress
+            // Rendering status
             if (e.rendering) {
-                String prog = renderStatus.isEmpty() ? "⏳ Rendering…" : "⏳ " + renderStatus;
-                ctx.drawTextWithShadow(textRenderer, prog,
-                        textX, rowY + ROW_H - 22, C_ORANGE);
-            } else {
-                renderActionLabels(ctx, e, textX, rowY + ROW_H - 22, mx, my);
+                ctx.drawTextWithShadow(textRenderer,
+                        "⏳ " + (renderStatus.isEmpty() ? "Rendering…" : renderStatus),
+                        textX, rowY + ROW_H - 22, 0xFFFFB74D);
             }
 
             rowY += ROW_H + ROW_PAD;
         }
 
         if (entries.isEmpty()) {
-            String msg = filtered.isEmpty() && searchBox.getText().isEmpty()
-                    ? "No recordings yet — start one from the main menu!"
-                    : "No recordings match your search.";
-            ctx.drawCenteredTextWithShadow(textRenderer, msg,
-                    width / 2, (height - 30) / 2 + 30, C_SUB);
+            ctx.drawCenteredTextWithShadow(textRenderer,
+                    filtered.isEmpty() && (searchBox == null || searchBox.getText().isEmpty())
+                            ? "No recordings yet — start one from the pause menu!"
+                            : "No recordings match your search.",
+                    width / 2, LIST_TOP + (height - LIST_TOP - FOOTER_H) / 2, C_SUB);
         }
     }
 
     private void renderThumb(DrawContext ctx, RecordingEntry e, int x, int y) {
         ctx.fill(x, y, x + THUMB_W, y + THUMB_H, C_THBG);
-
         Identifier id = thumbs.getThumbnail(e);
         if (id != null) {
             ctx.drawTexture(id, x, y, 0, 0, THUMB_W, THUMB_H);
         } else {
-            // Placeholder while thumbnail loads
             ctx.drawCenteredTextWithShadow(textRenderer, "🎬",
-                    x + THUMB_W / 2, y + THUMB_H / 2 - 10, C_SUB);
-            ctx.drawCenteredTextWithShadow(textRenderer, "Loading…",
-                    x + THUMB_W / 2, y + THUMB_H / 2 + 2, C_SUB);
+                    x + THUMB_W / 2, y + THUMB_H / 2 - 4, C_SUB);
         }
-
-        // Thin accent border
-        ctx.fill(x,            y,            x + THUMB_W,     y + 1,          C_ACCENT);
-        ctx.fill(x,            y + THUMB_H - 1, x + THUMB_W, y + THUMB_H,    C_ACCENT);
-        ctx.fill(x,            y,            x + 1,           y + THUMB_H,    C_ACCENT);
-        ctx.fill(x + THUMB_W - 1, y,         x + THUMB_W,     y + THUMB_H,   C_ACCENT);
-    }
-
-    private void renderActionLabels(DrawContext ctx, RecordingEntry e,
-                                    int x, int y, int mx, int my) {
-        String[] labels = getActionLabels(e);
-        int[]    colors = getActionColors(e);
-        int cx = x;
-        for (int j = 0; j < labels.length; j++) {
-            int lw = textRenderer.getWidth(labels[j]);
-            boolean hov = mx >= cx && mx <= cx + lw
-                       && my >= y  && my <= y + textRenderer.fontHeight;
-            ctx.drawTextWithShadow(textRenderer, labels[j], cx, y,
-                    hov ? 0xFFFFFFFF : colors[j]);
-            cx += lw + 10;
-        }
-    }
-
-    private String[] getActionLabels(RecordingEntry e) {
-        if (e.renderedMp4 != null)
-            return new String[]{"[ ▶ Play MP4 ]", "[ 📁 Folder ]", "[ 🗑 Delete ]"};
-        if (PojavFFmpegRenderer.canRender())
-            return new String[]{"[ 🎬 Render to MP4 ]", "[ 📁 Folder ]", "[ 🗑 Delete ]"};
-        return new String[]{"[ 📁 Folder ]", "[ 🗑 Delete ]",
-                            "[ ⚠ FFmpeg not found ]"};
-    }
-
-    private int[] getActionColors(RecordingEntry e) {
-        if (e.renderedMp4 != null)
-            return new int[]{C_GREEN, C_BLUE, C_RED};
-        if (PojavFFmpegRenderer.canRender())
-            return new int[]{C_ORANGE, C_BLUE, C_RED};
-        return new int[]{C_BLUE, C_RED, C_SUB};
-    }
-
-    private void renderFooter(DrawContext ctx) {
-        int fy = height - 28;
-        ctx.fill(0, fy, width, height, 0xFF0D0D1A);
-        ctx.fill(0, fy, width, fy + 1, C_ACCENT);
-        ctx.drawCenteredTextWithShadow(textRenderer,
-                "Page " + (page + 1) + " / " + totalPages(),
-                width / 2, height - 14, C_SUB);
-        if (!renderStatus.isEmpty()) {
-            ctx.drawTextWithShadow(textRenderer, renderStatus, 8, height - 14, C_ORANGE);
-        }
-    }
-
-    // ── Input ────────────────────────────────────────────────────────────────
-
-    @Override
-    public boolean mouseClicked(double mx, double my, int btn) {
-        if (super.mouseClicked(mx, my, btn)) return true;
-
-        List<RecordingEntry> entries = pageEntries();
-        int rowY = 34 + ROW_PAD;
-
-        for (RecordingEntry e : entries) {
-            int textX = ROW_PAD + 8 + THUMB_W + 10;
-            int actY  = rowY + ROW_H - 22;
-
-            if (my >= rowY && my <= rowY + ROW_H && !e.rendering) {
-                String[] labels = getActionLabels(e);
-                int cx = textX;
-                for (String label : labels) {
-                    int lw = textRenderer.getWidth(label);
-                    if (mx >= cx && mx <= cx + lw
-                            && my >= actY && my <= actY + textRenderer.fontHeight) {
-                        handleAction(e, label);
-                        return true;
-                    }
-                    cx += lw + 10;
-                }
-            }
-            rowY += ROW_H + ROW_PAD;
-        }
-        return false;
-    }
-
-    private void handleAction(RecordingEntry e, String label) {
-        if      (label.contains("Render"))  startRender(e);
-        else if (label.contains("Play"))    playFile(e.renderedMp4);
-        else if (label.contains("Folder"))  openFolder(e);
-        else if (label.contains("Delete"))  confirmDelete(e);
+        // Border
+        ctx.fill(x,            y,            x + THUMB_W, y + 1,          C_ACCENT);
+        ctx.fill(x,            y + THUMB_H-1, x + THUMB_W, y + THUMB_H,   C_ACCENT);
+        ctx.fill(x,            y,            x + 1,        y + THUMB_H,   C_ACCENT);
+        ctx.fill(x + THUMB_W-1, y,           x + THUMB_W, y + THUMB_H,   C_ACCENT);
     }
 
     // ── Actions ──────────────────────────────────────────────────────────────
 
     private void startRender(RecordingEntry e) {
         renderStatus = "Starting…";
-        PojavFFmpegRenderer.renderAsync(
-            e,
-            progress -> {
-                renderStatus = progress.length() > 55
-                        ? progress.substring(0, 52) + "…" : progress;
-            },
+        PojavFFmpegRenderer.renderAsync(e,
+            progress -> renderStatus = progress.length() > 50
+                    ? progress.substring(0, 47) + "…" : progress,
             mp4 -> {
                 renderStatus = "";
-                if (mp4 != null) {
-                    MinecraftClient.getInstance().execute(() -> {
-                        loadEntries();
-                        applyFilter(searchBox.getText());
-                    });
-                }
+                MinecraftClient.getInstance().execute(() -> {
+                    loadEntries();
+                    applyFilter(searchBox != null ? searchBox.getText() : "");
+                    rebuildRowButtons();
+                });
             }
         );
     }
 
+    /**
+     * Open a file using an Android intent.
+     * NEVER uses java.awt.Desktop — that crashes on Android even when
+     * isDesktopSupported() returns true (Caciocavallo partial AWT support).
+     */
     private void playFile(File file) {
         if (file == null || !file.exists()) return;
         try {
-            if (java.awt.Desktop.isDesktopSupported()) {
-                java.awt.Desktop.getDesktop().open(file);
-            } else {
-                // Android: fire ACTION_VIEW intent
-                Runtime.getRuntime().exec(new String[]{
-                    "am", "start", "-a", "android.intent.action.VIEW",
-                    "-d", "file://" + file.getAbsolutePath(), "-t", "video/mp4"
-                });
-            }
+            Runtime.getRuntime().exec(new String[]{
+                "am", "start",
+                "-a", "android.intent.action.VIEW",
+                "-d", "file://" + file.getAbsolutePath(),
+                "-t", "video/mp4",
+                "--flags", "0x10000001"  // FLAG_ACTIVITY_NEW_TASK | FLAG_GRANT_READ_URI_PERMISSION
+            });
         } catch (IOException ex) {
-            ScreenRecorderMod.LOGGER.error("Could not open file: " + file, ex);
-        }
-    }
-
-    private void openFolder(RecordingEntry e) {
-        try {
-            if (java.awt.Desktop.isDesktopSupported()) {
-                java.awt.Desktop.getDesktop().open(e.file.getParentFile());
-            } else {
-                Runtime.getRuntime().exec(new String[]{
-                    "am", "start", "-a", "android.intent.action.VIEW",
-                    "-d", "file://" + e.file.getParent(), "-t", "resource/folder"
-                });
-            }
-        } catch (IOException ex) {
-            ScreenRecorderMod.LOGGER.error("Could not open folder", ex);
+            ScreenRecorderMod.LOGGER.error("Could not play file: " + file, ex);
         }
     }
 
@@ -383,7 +352,8 @@ public class RecordingGalleryScreen extends Screen {
                     e.file.delete();
                     if (e.renderedMp4 != null) e.renderedMp4.delete();
                     loadEntries();
-                    applyFilter(searchBox.getText());
+                    applyFilter(searchBox != null ? searchBox.getText() : "");
+                    rebuildRowButtons();
                 }
                 client.setScreen(this);
             },
@@ -394,16 +364,17 @@ public class RecordingGalleryScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double h, double v) {
-        if      (v < 0 && page < totalPages() - 1) page++;
-        else if (v > 0 && page > 0)                page--;
+        if      (v < 0 && page < totalPages() - 1) changePage(1);
+        else if (v > 0 && page > 0)                changePage(-1);
         return true;
     }
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (searchBox.isFocused()) return super.keyPressed(keyCode, scanCode, modifiers);
-        if (keyCode == 263 && page > 0)                { page--; return true; }
-        if (keyCode == 262 && page < totalPages() - 1) { page++; return true; }
+        if (searchBox != null && searchBox.isFocused())
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        if (keyCode == 263 && page > 0)                { changePage(-1); return true; }
+        if (keyCode == 262 && page < totalPages() - 1) { changePage(1);  return true; }
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
