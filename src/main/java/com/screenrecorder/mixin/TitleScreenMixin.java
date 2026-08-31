@@ -15,25 +15,19 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Adds recording control buttons to the Minecraft main menu (title screen).
- *
- * Button layout (ReplayMod-inspired, bottom-left corner):
- *   Row 1 (top):    [▶ Start] or [⏸ Pause] / [▶ Resume]   (state-dependent)
- *   Row 2:          [⏹ Stop Recording]                      (hidden when IDLE)
- *   Row 3:          [🎬 My Recordings]  [⚙ Settings]       (always visible)
- *
- * All buttons update each frame to stay in sync with RecordingManager state,
- * including changes triggered by keybindings while on this screen.
+ * Adds recording buttons to the main menu (title screen).
+ * Same layout as GameMenuScreenMixin but also includes Settings button.
+ * Buttons sit in the bottom-left corner and never overlap vanilla UI.
  */
 @Mixin(TitleScreen.class)
 public abstract class TitleScreenMixin extends Screen {
 
-    private ButtonWidget startButton;
-    private ButtonWidget pauseButton;
-    private ButtonWidget resumeButton;
-    private ButtonWidget stopButton;
-    private ButtonWidget galleryButton;
-    private ButtonWidget settingsButton;
+    private ButtonWidget recStartButton;
+    private ButtonWidget recPauseButton;
+    private ButtonWidget recResumeButton;
+    private ButtonWidget recStopButton;
+    private ButtonWidget recGalleryButton;
+    private ButtonWidget recSettingsButton;
 
     protected TitleScreenMixin(Text title) {
         super(title);
@@ -43,87 +37,69 @@ public abstract class TitleScreenMixin extends Screen {
     private void onInit(CallbackInfo ci) {
         RecordingManager manager = RecordingManager.getInstance();
 
-        int btnH   = 20;
-        int margin = 4;
-        int gap    = 2;
+        int w     = 150;
+        int h     = 20;
+        int x     = 4;
+        int gap   = 4;
+        int baseY = this.height - 4 - h;
 
-        // Bottom row: Gallery + Settings (split into two halves)
-        int bottomRowW = 150;
-        int halfW      = (bottomRowW - gap) / 2;
-        int x          = margin;
-        int baseY      = this.height - margin - btnH;
-
-        // Row 3 — always visible
-        galleryButton = ButtonWidget.builder(
+        // Row 1 (bottom): Gallery + Settings side by side
+        int halfW = (w - gap) / 2;
+        recGalleryButton = ButtonWidget.builder(
                 Text.translatable("screenrecorder.button.gallery"),
                 btn -> this.client.setScreen(new RecordingGalleryScreen(this))
-        ).dimensions(x, baseY, halfW, btnH).build();
+        ).dimensions(x, baseY, halfW, h).build();
 
-        settingsButton = ButtonWidget.builder(
+        recSettingsButton = ButtonWidget.builder(
                 Text.translatable("screenrecorder.button.settings"),
                 btn -> this.client.setScreen(new RecordingSettingsScreen(this))
-        ).dimensions(x + halfW + gap, baseY, halfW, btnH).build();
+        ).dimensions(x + halfW + gap, baseY, halfW, h).build();
 
-        // Row 2 — Stop (visible only when not IDLE)
-        stopButton = ButtonWidget.builder(
+        // Row 2: Stop
+        recStopButton = ButtonWidget.builder(
                 Text.translatable("screenrecorder.button.stop"),
-                btn -> {
-                    manager.stopRecording();
-                    updateButtonVisibility();
-                }
-        ).dimensions(x, baseY - btnH - margin, bottomRowW, btnH).build();
+                btn -> { manager.stopRecording(); updateButtons(); }
+        ).dimensions(x, baseY - h - gap, w, h).build();
 
-        // Row 1 — Start / Pause / Resume (mutually exclusive)
-        startButton = ButtonWidget.builder(
+        // Row 3: Start / Pause / Resume (same position, mutually exclusive)
+        recStartButton = ButtonWidget.builder(
                 Text.translatable("screenrecorder.button.start"),
-                btn -> {
-                    manager.startRecording();
-                    updateButtonVisibility();
-                }
-        ).dimensions(x, baseY - (btnH + margin) * 2, bottomRowW, btnH).build();
+                btn -> { manager.startRecording(); updateButtons(); }
+        ).dimensions(x, baseY - (h + gap) * 2, w, h).build();
 
-        pauseButton = ButtonWidget.builder(
+        recPauseButton = ButtonWidget.builder(
                 Text.translatable("screenrecorder.button.pause"),
-                btn -> {
-                    manager.pauseRecording();
-                    updateButtonVisibility();
-                }
-        ).dimensions(x, baseY - (btnH + margin) * 2, bottomRowW, btnH).build();
+                btn -> { manager.pauseRecording(); updateButtons(); }
+        ).dimensions(x, baseY - (h + gap) * 2, w, h).build();
 
-        resumeButton = ButtonWidget.builder(
+        recResumeButton = ButtonWidget.builder(
                 Text.translatable("screenrecorder.button.resume"),
-                btn -> {
-                    manager.resumeRecording();
-                    updateButtonVisibility();
-                }
-        ).dimensions(x, baseY - (btnH + margin) * 2, bottomRowW, btnH).build();
+                btn -> { manager.resumeRecording(); updateButtons(); }
+        ).dimensions(x, baseY - (h + gap) * 2, w, h).build();
 
-        this.addDrawableChild(startButton);
-        this.addDrawableChild(pauseButton);
-        this.addDrawableChild(resumeButton);
-        this.addDrawableChild(stopButton);
-        this.addDrawableChild(galleryButton);
-        this.addDrawableChild(settingsButton);
+        this.addDrawableChild(recStartButton);
+        this.addDrawableChild(recPauseButton);
+        this.addDrawableChild(recResumeButton);
+        this.addDrawableChild(recStopButton);
+        this.addDrawableChild(recGalleryButton);
+        this.addDrawableChild(recSettingsButton);
 
-        updateButtonVisibility();
+        updateButtons();
     }
 
     @Inject(method = "render", at = @At("RETURN"))
-    private void onRender(DrawContext context, int mouseX, int mouseY,
-                          float delta, CallbackInfo ci) {
-        updateButtonVisibility();
+    private void onRender(DrawContext ctx, int mx, int my, float delta, CallbackInfo ci) {
+        updateButtons();
     }
 
-    private void updateButtonVisibility() {
-        if (startButton == null) return;
+    private void updateButtons() {
+        if (recStartButton == null) return;
         RecordingState state = RecordingManager.getInstance().getState();
-
-        startButton.visible  = (state == RecordingState.IDLE);
-        pauseButton.visible  = (state == RecordingState.RECORDING);
-        resumeButton.visible = (state == RecordingState.PAUSED);
-        stopButton.visible   = (state != RecordingState.IDLE);
-        // gallery + settings always visible
-        galleryButton.visible  = true;
-        settingsButton.visible = true;
+        recStartButton.visible  = (state == RecordingState.IDLE);
+        recPauseButton.visible  = (state == RecordingState.RECORDING);
+        recResumeButton.visible = (state == RecordingState.PAUSED);
+        recStopButton.visible   = (state != RecordingState.IDLE);
+        recGalleryButton.visible  = true;
+        recSettingsButton.visible = true;
     }
 }
